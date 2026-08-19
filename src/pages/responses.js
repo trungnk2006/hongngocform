@@ -7,11 +7,28 @@ import {
   escapeHtml,
   formatDate,
   formatFileSize,
+  generateCsv,
   showToast,
   showConfirm,
 } from '../utils.js';
 
 let selectedResponseId = null;
+let selectedFilterDate = '';
+
+function getLocalDateString(timestamp) {
+  if (!timestamp) return '';
+  const d = new Date(timestamp);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDisplayDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+}
 
 export async function renderResponses(container, formId, signal) {
   // Show loading
@@ -36,11 +53,19 @@ export async function renderResponses(container, formId, signal) {
   }
 
   selectedResponseId = null;
+  selectedFilterDate = '';
   await renderResponsesPage(container, form, signal);
 }
 
 async function renderResponsesPage(container, form, signal) {
-  const responses = await store.getResponses(form.id);
+  const allResponses = await store.getResponses(form.id);
+
+  // Apply date filter
+  const filteredResponses = selectedFilterDate
+    ? allResponses.filter(
+        (r) => getLocalDateString(r.submittedAt) === selectedFilterDate
+      )
+    : allResponses;
 
   container.innerHTML = `
     <nav class="nav">
@@ -61,8 +86,11 @@ async function renderResponsesPage(container, form, signal) {
           </div>
           <div class="nav-actions">
             ${
-              responses.length > 0
-                ? `<button class="btn btn-secondary btn-sm" id="export-btn">📥 Xuất JSON</button>`
+              allResponses.length > 0
+                ? `
+                  <button class="btn btn-primary btn-sm" id="export-csv-btn">📊 Xuất CSV (Excel)</button>
+                  <button class="btn btn-secondary btn-sm" id="export-btn">📥 Xuất JSON</button>
+                `
                 : ''
             }
             <a href="#/form/${form.id}" class="btn btn-secondary btn-sm">👁️ Xem biểu mẫu</a>
@@ -72,22 +100,67 @@ async function renderResponsesPage(container, form, signal) {
         <!-- Stats -->
         <div class="stats-grid">
           <div class="stat-card card">
-            <div class="stat-value">${responses.length}</div>
+            <div class="stat-value">${allResponses.length}</div>
             <div class="stat-label">Tổng phản hồi</div>
           </div>
           <div class="stat-card card">
-            <div class="stat-value">${form.questions.length}</div>
-            <div class="stat-label">Câu hỏi</div>
+            <div class="stat-value">${selectedFilterDate ? filteredResponses.length : form.questions.length}</div>
+            <div class="stat-label">${selectedFilterDate ? 'Khớp bộ lọc' : 'Câu hỏi'}</div>
           </div>
           <div class="stat-card card">
-            <div class="stat-value">${responses.length > 0 ? formatDate(responses[responses.length - 1].submittedAt).split(',')[0] : '—'}</div>
+            <div class="stat-value">${allResponses.length > 0 ? formatDate(allResponses[allResponses.length - 1].submittedAt).split(',')[0] : '—'}</div>
             <div class="stat-label">Phản hồi gần nhất</div>
           </div>
         </div>
 
+        <!-- Filter Toolbar -->
+        ${
+          allResponses.length > 0
+            ? `
+              <div class="filter-toolbar card">
+                <div class="filter-toolbar-left">
+                  <label for="filter-date-input" class="filter-label">
+                    <span class="filter-icon">📅</span> Lọc theo ngày:
+                  </label>
+                  <div class="filter-input-wrapper">
+                    <input 
+                      type="date" 
+                      id="filter-date-input" 
+                      class="filter-date-input" 
+                      value="${selectedFilterDate}"
+                    />
+                    ${
+                      selectedFilterDate
+                        ? `<button class="btn-clear-date" id="clear-date-btn" title="Xóa chọn ngày">✕</button>`
+                        : ''
+                    }
+                  </div>
+                  <div class="filter-quick-buttons">
+                    <button class="btn btn-sm ${selectedFilterDate === getLocalDateString(Date.now()) ? 'btn-primary' : 'btn-secondary'}" id="filter-today-btn">Hôm nay</button>
+                    <button class="btn btn-sm ${!selectedFilterDate ? 'btn-primary' : 'btn-secondary'}" id="filter-all-btn">Tất cả</button>
+                  </div>
+                </div>
+                <div class="filter-toolbar-right">
+                  <span class="filter-count-badge">
+                    ${
+                      selectedFilterDate
+                        ? `Ngày <strong>${formatDisplayDate(selectedFilterDate)}</strong>: <strong>${filteredResponses.length}</strong> / ${allResponses.length} phản hồi`
+                        : `Tổng số: <strong>${allResponses.length}</strong> phản hồi`
+                    }
+                  </span>
+                </div>
+              </div>
+            `
+            : ''
+        }
+
         <!-- Response Detail or List -->
         <div id="responses-content">
-          ${selectedResponseId ? renderResponseDetail(form, responses) : renderResponseList(form, responses)}
+          ${
+            selectedResponseId
+              ? renderResponseDetail(form, allResponses)
+              : renderResponseList(form, filteredResponses, allResponses.length, selectedFilterDate)
+          }
         </div>
       </div>
     </main>
@@ -96,8 +169,8 @@ async function renderResponsesPage(container, form, signal) {
   setupResponsesEvents(container, form, signal);
 }
 
-function renderResponseList(form, responses) {
-  if (responses.length === 0) {
+function renderResponseList(form, responses, totalCount, filterDate) {
+  if (totalCount === 0) {
     return `
       <div class="no-responses">
         <div class="no-responses-icon">📭</div>
@@ -107,9 +180,21 @@ function renderResponseList(form, responses) {
     `;
   }
 
+  if (responses.length === 0) {
+    return `
+      <div class="no-responses card">
+        <div class="no-responses-icon">🔍</div>
+        <p>Không có phản hồi nào trong ngày <strong>${formatDisplayDate(filterDate)}</strong></p>
+        <p style="font-size: 0.85rem; margin-top: 12px;">
+          <button class="btn btn-sm btn-primary" id="reset-filter-btn">Xem tất cả phản hồi</button>
+        </p>
+      </div>
+    `;
+  }
+
   return `
     <div class="response-list-header">
-      <h2>Tất cả phản hồi (${responses.length})</h2>
+      <h2>${filterDate ? `Phản hồi ngày ${formatDisplayDate(filterDate)} (${responses.length})` : `Tất cả phản hồi (${responses.length})`}</h2>
     </div>
     <div class="response-list">
       ${responses
@@ -144,7 +229,7 @@ function renderResponseDetail(form, responses) {
   const resp = responses.find((r) => r.id === selectedResponseId);
   if (!resp) {
     selectedResponseId = null;
-    return renderResponseList(form, responses);
+    return renderResponseList(form, responses, responses.length, selectedFilterDate);
   }
 
   const index = responses.indexOf(resp);
@@ -230,9 +315,43 @@ function renderAnswerValue(question, answer) {
 }
 
 function setupResponsesEvents(container, form, signal) {
+  // Date input change event
+  const dateInput = container.querySelector('#filter-date-input');
+  if (dateInput) {
+    dateInput.addEventListener(
+      'change',
+      async (e) => {
+        selectedFilterDate = e.target.value;
+        selectedResponseId = null;
+        await renderResponsesPage(container, form, signal);
+      },
+      { signal }
+    );
+  }
+
   container.addEventListener(
     'click',
     async (e) => {
+      // "Hôm nay" button
+      if (e.target.closest('#filter-today-btn')) {
+        selectedFilterDate = getLocalDateString(Date.now());
+        selectedResponseId = null;
+        await renderResponsesPage(container, form, signal);
+        return;
+      }
+
+      // "Tất cả" button or "reset-filter-btn" or "clear-date-btn"
+      if (
+        e.target.closest('#filter-all-btn') ||
+        e.target.closest('#reset-filter-btn') ||
+        e.target.closest('#clear-date-btn')
+      ) {
+        selectedFilterDate = '';
+        selectedResponseId = null;
+        await renderResponsesPage(container, form, signal);
+        return;
+      }
+
       // Click response item to view detail
       const responseItem = e.target.closest('.response-item');
       if (responseItem) {
@@ -248,11 +367,7 @@ function setupResponsesEvents(container, form, signal) {
       // Back to list
       if (e.target.closest('#back-to-list-btn')) {
         selectedResponseId = null;
-        const contentEl = container.querySelector('#responses-content');
-        const responses = await store.getResponses(form.id);
-        if (contentEl) {
-          contentEl.innerHTML = renderResponseList(form, responses);
-        }
+        await renderResponsesPage(container, form, signal);
         return;
       }
 
@@ -281,7 +396,47 @@ function setupResponsesEvents(container, form, signal) {
         return;
       }
 
-      // Export button
+      // Export CSV button
+      const exportCsvBtn = e.target.closest('#export-csv-btn');
+      if (exportCsvBtn) {
+        exportCsvBtn.disabled = true;
+        const originalText = exportCsvBtn.textContent;
+        exportCsvBtn.textContent = '⏳ Đang xuất CSV...';
+        try {
+          const allResponses = await store.getResponses(form.id);
+          const targetResponses = selectedFilterDate
+            ? allResponses.filter(
+                (r) => getLocalDateString(r.submittedAt) === selectedFilterDate
+              )
+            : allResponses;
+
+          if (targetResponses.length === 0) {
+            showToast('Không có dữ liệu phản hồi để xuất', 'warning');
+            exportCsvBtn.disabled = false;
+            exportCsvBtn.textContent = originalText;
+            return;
+          }
+
+          const csvData = generateCsv(form, targetResponses);
+          const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const dateSuffix = selectedFilterDate ? `_${selectedFilterDate}` : '';
+          const safeTitle = form.title.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g, '_');
+          a.href = url;
+          a.download = `${safeTitle}${dateSuffix}_responses.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast(`Đã xuất ${targetResponses.length} phản hồi sang file Excel (CSV)!`, 'success');
+        } catch (err) {
+          showToast('Lỗi khi xuất CSV: ' + err.message, 'error');
+        }
+        exportCsvBtn.disabled = false;
+        exportCsvBtn.textContent = originalText;
+        return;
+      }
+
+      // Export JSON button
       if (e.target.closest('#export-btn')) {
         const exportBtn = e.target.closest('#export-btn');
         exportBtn.disabled = true;
@@ -295,7 +450,7 @@ function setupResponsesEvents(container, form, signal) {
           a.download = `${form.title.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g, '_')}_responses.json`;
           a.click();
           URL.revokeObjectURL(url);
-          showToast('Đã xuất dữ liệu phản hồi!', 'success');
+          showToast('Đã xuất dữ liệu phản hồi JSON!', 'success');
         } catch (err) {
           showToast('Lỗi khi xuất: ' + err.message, 'error');
         }
@@ -319,3 +474,4 @@ function setupResponsesEvents(container, form, signal) {
     { signal }
   );
 }
+

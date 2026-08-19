@@ -94,3 +94,47 @@ export function readFileAsDataUrl(file) {
     reader.readAsDataURL(file);
   });
 }
+
+export function generateCsv(form, responses) {
+  // UTF-8 BOM so Microsoft Excel correctly displays Vietnamese characters
+  const BOM = '\uFEFF';
+
+  // Build CSV headers: STT, Thời gian gửi, and form questions
+  const headers = [
+    'STT',
+    'Thời gian gửi',
+    ...(form.questions || []).map((q) => q.text || 'Câu hỏi'),
+  ];
+
+  const escapeCsvCell = (val) => {
+    if (val === null || val === undefined) return '""';
+    let str = '';
+    if (typeof val === 'object') {
+      if (val.name) {
+        str = val.url ? `${val.name} (${val.url})` : val.name;
+      } else {
+        str = JSON.stringify(val);
+      }
+    } else {
+      str = String(val);
+    }
+    return `"${str.replace(/"/g, '""')}"`;
+  };
+
+  const rows = [headers.map(escapeCsvCell).join(',')];
+
+  responses.forEach((resp, index) => {
+    const row = [
+      index + 1,
+      formatDate(resp.submittedAt),
+      ...(form.questions || []).map((q) => {
+        const answer = resp.answers ? resp.answers[q.id] : '';
+        return answer !== undefined ? answer : '';
+      }),
+    ];
+    rows.push(row.map(escapeCsvCell).join(','));
+  });
+
+  return BOM + rows.join('\r\n');
+}
+
