@@ -3,9 +3,8 @@
 // ================================
 
 const SESSION_KEY = 'hngf_admin_session';
-const PIN_STORAGE_KEY = 'hngf_custom_admin_pin';
 
-// Default PIN if not configured in .env or localStorage
+// Default PIN if not configured in .env
 const DEFAULT_PIN = '123456';
 
 export function getAdminPin() {
@@ -13,15 +12,7 @@ export function getAdminPin() {
   if (envPin && String(envPin).trim()) {
     return String(envPin).trim();
   }
-  return localStorage.getItem(PIN_STORAGE_KEY) || DEFAULT_PIN;
-}
-
-export function setCustomAdminPin(newPin) {
-  if (newPin && String(newPin).trim()) {
-    localStorage.setItem(PIN_STORAGE_KEY, String(newPin).trim());
-    return true;
-  }
-  return false;
+  return DEFAULT_PIN;
 }
 
 export function isAdminAuthenticated() {

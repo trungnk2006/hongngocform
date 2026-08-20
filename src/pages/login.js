@@ -2,7 +2,7 @@
 // Admin Login / Passcode Lock Screen
 // ================================
 
-import { verifyAdminPin, getAdminPin, setCustomAdminPin } from '../auth.js';
+import { verifyAdminPin, getAdminPin } from '../auth.js';
 import { showToast } from '../utils.js';
 
 export function renderAdminLogin(container, onSuccess) {
@@ -50,7 +50,7 @@ export function renderAdminLogin(container, onSuccess) {
           isDefaultPin
             ? `<div style="background: #fefce8; border: 1px dashed #fde047; border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; color: #854d0e; text-align: left; margin-top: 12px;">
                 💡 <b>Mã PIN mặc định:</b> <code>123456</code><br>
-                (Bạn có thể đổi mã PIN này sau khi đăng nhập)
+                (Cấu hình biến <code>VITE_ADMIN_PIN</code> trong file <code>.env</code> để đổi mã PIN bảo mật)
                </div>`
             : ''
         }

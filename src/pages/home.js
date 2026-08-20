@@ -4,7 +4,7 @@
 
 import { store } from '../store.js';
 import { isConfigured } from '../supabase.js';
-import { adminLogout, setCustomAdminPin } from '../auth.js';
+import { adminLogout } from '../auth.js';
 import { escapeHtml, formatDate, showToast, showConfirm } from '../utils.js';
 
 export async function renderHome(container, signal) {
@@ -38,9 +38,6 @@ export async function renderHome(container, signal) {
           <span>＋</span>
           <span class="btn-label">Tạo biểu mẫu</span>
         </a>
-        <button class="btn btn-secondary btn-sm" id="btn-change-pin" title="Đổi mã PIN Admin">
-          🔑 Đổi PIN
-        </button>
         <button class="btn btn-secondary btn-sm" id="btn-admin-logout" title="Đăng xuất Admin">
           🔒 Thoát
         </button>
@@ -67,10 +64,9 @@ function renderEmptyState() {
     <div class="empty-state">
       <div class="empty-icon">📋</div>
       <h2>Chưa có biểu mẫu nào</h2>
-      <p>Bắt đầu bằng cách tạo biểu mẫu đầu tiên hoặc dùng mẫu có sẵn</p>
-      <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
-        <button class="btn btn-primary btn-lg" id="btn-create-sample">✨ Tạo biểu mẫu Thầy Cô giáo (Mẫu sẵn)</button>
-        <a href="#/create" class="btn btn-secondary btn-lg">＋ Tạo biểu mẫu tùy chỉnh</a>
+      <p>Bắt đầu bằng cách tạo biểu mẫu mới của bạn</p>
+      <div>
+        <a href="#/create" class="btn btn-primary btn-lg">＋ Tạo biểu mẫu mới</a>
       </div>
     </div>
   `;
@@ -128,62 +124,6 @@ function setupHomeEvents(container, signal) {
         showToast('Đã đăng xuất khu vực quản trị', 'info');
         window.location.hash = '#/';
         window.dispatchEvent(new HashChangeEvent('hashchange'));
-        return;
-      }
-
-      // Change PIN
-      if (e.target.closest('#btn-change-pin')) {
-        const newPin = prompt('Nhập mã PIN Admin mới (tối thiểu 4 ký tự):');
-        if (newPin && newPin.trim().length >= 4) {
-          setCustomAdminPin(newPin.trim());
-          showToast('Đã cập nhật mã PIN Admin mới!', 'success');
-        } else if (newPin !== null) {
-          showToast('Mã PIN cần ít nhất 4 ký tự', 'error');
-        }
-        return;
-      }
-
-      // Create sample form
-      if (e.target.closest('#btn-create-sample')) {
-        const btn = e.target.closest('#btn-create-sample');
-        btn.disabled = true;
-        btn.textContent = '⏳ Đang tạo...';
-        try {
-          const sampleForm = {
-            title: 'Biểu Mẫu Xác Nhận Hoàn Thành Bài Thi',
-            description: 'Thầy cô vui lòng điền thông tin và tải ảnh minh chứng kết quả thi để nhà trường xác nhận.',
-            questions: [
-              {
-                id: 'q_' + Math.random().toString(36).substr(2, 9),
-                text: 'Họ tên của thầy cô?',
-                type: 'text',
-                required: true,
-                options: [],
-              },
-              {
-                id: 'q_' + Math.random().toString(36).substr(2, 9),
-                text: 'Thầy cô thuộc tổ nào?',
-                type: 'choice',
-                required: true,
-                options: ['Khoa học xã hội', 'Khoa học tự nhiên'],
-              },
-              {
-                id: 'q_' + Math.random().toString(36).substr(2, 9),
-                text: 'Thầy cô vui lòng tải ảnh minh chứng kết quả hoàn thành bài thi để xác nhận',
-                type: 'file',
-                required: true,
-                options: [],
-              },
-            ],
-          };
-          await store.saveForm(sampleForm);
-          showToast('Đã tạo biểu mẫu mẫu thành công!', 'success');
-          await renderHome(container, signal);
-        } catch (err) {
-          showToast('Lỗi khi tạo: ' + err.message, 'error');
-          btn.disabled = false;
-          btn.textContent = '✨ Tạo biểu mẫu Thầy Cô giáo (Mẫu sẵn)';
-        }
         return;
       }
 

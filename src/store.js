@@ -84,17 +84,24 @@ function createLocalStore() {
     },
 
     async deleteResponse(formId, responseId) {
+      return this.deleteResponses(formId, [responseId]);
+    },
+
+    async deleteResponses(formId, responseIds) {
+      if (!responseIds || responseIds.length === 0) return;
+      const idSet = new Set(responseIds);
       const responses = getData(RESPONSES_KEY);
       if (responses[formId]) {
-        responses[formId] = responses[formId].filter((r) => r.id !== responseId);
+        responses[formId] = responses[formId].filter((r) => !idSet.has(r.id));
         setData(RESPONSES_KEY, responses);
       }
       const forms = getData(FORMS_KEY);
       if (forms[formId]) {
-        forms[formId].responseCount = Math.max(0, (forms[formId].responseCount || 0) - 1);
+        forms[formId].responseCount = Math.max(0, (responses[formId] || []).length);
         setData(FORMS_KEY, forms);
       }
     },
+
 
     async uploadFile(file) {
       return new Promise((resolve, reject) => {
@@ -267,19 +274,26 @@ function createSupabaseStore() {
     },
 
     async deleteResponse(formId, responseId) {
-      // Clean up any uploaded file in this response
+      return this.deleteResponses(formId, [responseId]);
+    },
+
+    async deleteResponses(formId, responseIds) {
+      if (!responseIds || responseIds.length === 0) return;
+
+      // Clean up any uploaded file in these responses
       try {
-        const { data: resp } = await supabase
+        const { data: resps } = await supabase
           .from('responses')
           .select('answers')
-          .eq('id', responseId)
-          .single();
+          .in('id', responseIds);
 
-        if (resp && resp.answers) {
+        if (resps && resps.length > 0) {
           const filePaths = [];
-          for (const ans of Object.values(resp.answers)) {
-            if (ans && ans.storagePath) {
-              filePaths.push(ans.storagePath);
+          for (const resp of resps) {
+            for (const ans of Object.values(resp.answers || {})) {
+              if (ans && ans.storagePath) {
+                filePaths.push(ans.storagePath);
+              }
             }
           }
           if (filePaths.length > 0) {
@@ -293,23 +307,22 @@ function createSupabaseStore() {
       const { error } = await supabase
         .from('responses')
         .delete()
-        .eq('id', responseId);
+        .in('id', responseIds);
 
       if (error) throw error;
 
-      // Decrement counter
+      // Update counter in forms table
       try {
-        const form = await this.getForm(formId);
-        if (form) {
-          await supabase
-            .from('forms')
-            .update({ response_count: Math.max(0, (form.responseCount || 1) - 1) })
-            .eq('id', formId);
-        }
+        const remaining = await this.getResponses(formId);
+        await supabase
+          .from('forms')
+          .update({ response_count: remaining.length })
+          .eq('id', formId);
       } catch (e) {
         /* ignore */
       }
     },
+
 
     async uploadFile(file, formId, questionId) {
       const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');

@@ -14,6 +14,8 @@ import {
 
 let selectedResponseId = null;
 let selectedFilterDate = '';
+let currentForm = null;
+let cachedResponses = [];
 
 function getLocalDateString(timestamp) {
   if (!timestamp) return '';
@@ -52,20 +54,25 @@ export async function renderResponses(container, formId, signal) {
     return;
   }
 
+  currentForm = form;
   selectedResponseId = null;
   selectedFilterDate = '';
-  await renderResponsesPage(container, form, signal);
+  cachedResponses = await store.getResponses(form.id);
+
+  renderResponsesPageSkeleton(container, signal);
 }
 
-async function renderResponsesPage(container, form, signal) {
-  const allResponses = await store.getResponses(form.id);
+function getFilteredResponses() {
+  if (!selectedFilterDate) return cachedResponses;
+  return cachedResponses.filter(
+    (r) => getLocalDateString(r.submittedAt) === selectedFilterDate
+  );
+}
 
-  // Apply date filter
-  const filteredResponses = selectedFilterDate
-    ? allResponses.filter(
-        (r) => getLocalDateString(r.submittedAt) === selectedFilterDate
-      )
-    : allResponses;
+function renderResponsesPageSkeleton(container, signal) {
+  const allResponses = cachedResponses;
+  const filteredResponses = getFilteredResponses();
+  const form = currentForm;
 
   container.innerHTML = `
     <nav class="nav">
@@ -84,7 +91,7 @@ async function renderResponsesPage(container, form, signal) {
             <h1 class="page-title">📊 Phản hồi</h1>
             <p class="page-subtitle">${escapeHtml(form.title)}</p>
           </div>
-          <div class="nav-actions">
+          <div class="nav-actions" id="header-actions">
             ${
               allResponses.length > 0
                 ? `
@@ -100,15 +107,15 @@ async function renderResponsesPage(container, form, signal) {
         <!-- Stats -->
         <div class="stats-grid">
           <div class="stat-card card">
-            <div class="stat-value">${allResponses.length}</div>
+            <div class="stat-value" id="stat-total-responses">${allResponses.length}</div>
             <div class="stat-label">Tổng phản hồi</div>
           </div>
           <div class="stat-card card">
-            <div class="stat-value">${selectedFilterDate ? filteredResponses.length : form.questions.length}</div>
-            <div class="stat-label">${selectedFilterDate ? 'Khớp bộ lọc' : 'Câu hỏi'}</div>
+            <div class="stat-value" id="stat-filtered-responses">${selectedFilterDate ? filteredResponses.length : form.questions.length}</div>
+            <div class="stat-label" id="stat-filtered-label">${selectedFilterDate ? 'Khớp bộ lọc' : 'Câu hỏi'}</div>
           </div>
           <div class="stat-card card">
-            <div class="stat-value">${allResponses.length > 0 ? formatDate(allResponses[allResponses.length - 1].submittedAt).split(',')[0] : '—'}</div>
+            <div class="stat-value" id="stat-latest-response">${allResponses.length > 0 ? formatDate(allResponses[allResponses.length - 1].submittedAt).split(',')[0] : '—'}</div>
             <div class="stat-label">Phản hồi gần nhất</div>
           </div>
         </div>
@@ -117,7 +124,7 @@ async function renderResponsesPage(container, form, signal) {
         ${
           allResponses.length > 0
             ? `
-              <div class="filter-toolbar card">
+              <div class="filter-toolbar card" id="filter-toolbar-container">
                 <div class="filter-toolbar-left">
                   <label for="filter-date-input" class="filter-label">
                     <span class="filter-icon">📅</span> Lọc theo ngày:
@@ -129,11 +136,12 @@ async function renderResponsesPage(container, form, signal) {
                       class="filter-date-input" 
                       value="${selectedFilterDate}"
                     />
-                    ${
-                      selectedFilterDate
-                        ? `<button class="btn-clear-date" id="clear-date-btn" title="Xóa chọn ngày">✕</button>`
-                        : ''
-                    }
+                    <button 
+                      class="btn-clear-date" 
+                      id="clear-date-btn" 
+                      title="Xóa chọn ngày" 
+                      style="${selectedFilterDate ? '' : 'display: none;'}"
+                    >✕</button>
                   </div>
                   <div class="filter-quick-buttons">
                     <button class="btn btn-sm ${selectedFilterDate === getLocalDateString(Date.now()) ? 'btn-primary' : 'btn-secondary'}" id="filter-today-btn">Hôm nay</button>
@@ -141,13 +149,18 @@ async function renderResponsesPage(container, form, signal) {
                   </div>
                 </div>
                 <div class="filter-toolbar-right">
-                  <span class="filter-count-badge">
+                  <span class="filter-count-badge" id="filter-count-badge">
                     ${
                       selectedFilterDate
                         ? `Ngày <strong>${formatDisplayDate(selectedFilterDate)}</strong>: <strong>${filteredResponses.length}</strong> / ${allResponses.length} phản hồi`
                         : `Tổng số: <strong>${allResponses.length}</strong> phản hồi`
                     }
                   </span>
+                  ${
+                    selectedFilterDate && filteredResponses.length > 0
+                      ? `<button class="btn btn-danger btn-sm" id="delete-by-date-btn" title="Xóa tất cả phản hồi trong ngày ${formatDisplayDate(selectedFilterDate)}">🗑️ Xóa tất cả ngày này (${filteredResponses.length})</button>`
+                      : ''
+                  }
                 </div>
               </div>
             `
@@ -166,7 +179,74 @@ async function renderResponsesPage(container, form, signal) {
     </main>
   `;
 
-  setupResponsesEvents(container, form, signal);
+  setupResponsesEvents(container, signal);
+}
+
+function updateFilterView(container) {
+  const allResponses = cachedResponses;
+  const filteredResponses = getFilteredResponses();
+  const form = currentForm;
+
+  // 1. Update date input value
+  const dateInput = container.querySelector('#filter-date-input');
+  if (dateInput && dateInput.value !== selectedFilterDate) {
+    dateInput.value = selectedFilterDate;
+  }
+
+  // 2. Update clear button visibility
+  const clearBtn = container.querySelector('#clear-date-btn');
+  if (clearBtn) {
+    clearBtn.style.display = selectedFilterDate ? 'flex' : 'none';
+  }
+
+  // 3. Update quick buttons
+  const todayStr = getLocalDateString(Date.now());
+  const todayBtn = container.querySelector('#filter-today-btn');
+  if (todayBtn) {
+    todayBtn.className = `btn btn-sm ${selectedFilterDate === todayStr ? 'btn-primary' : 'btn-secondary'}`;
+  }
+
+  const allBtn = container.querySelector('#filter-all-btn');
+  if (allBtn) {
+    allBtn.className = `btn btn-sm ${!selectedFilterDate ? 'btn-primary' : 'btn-secondary'}`;
+  }
+
+  // 4. Update right toolbar (badge + delete by date button)
+  const rightEl = container.querySelector('.filter-toolbar-right');
+  if (rightEl) {
+    rightEl.innerHTML = `
+      <span class="filter-count-badge" id="filter-count-badge">
+        ${
+          selectedFilterDate
+            ? `Ngày <strong>${formatDisplayDate(selectedFilterDate)}</strong>: <strong>${filteredResponses.length}</strong> / ${allResponses.length} phản hồi`
+            : `Tổng số: <strong>${allResponses.length}</strong> phản hồi`
+        }
+      </span>
+      ${
+        selectedFilterDate && filteredResponses.length > 0
+          ? `<button class="btn btn-danger btn-sm" id="delete-by-date-btn" title="Xóa tất cả phản hồi trong ngày ${formatDisplayDate(selectedFilterDate)}">🗑️ Xóa tất cả ngày này (${filteredResponses.length})</button>`
+          : ''
+      }
+    `;
+  }
+
+  // 5. Update stat cards
+  const statFilteredVal = container.querySelector('#stat-filtered-responses');
+  const statFilteredLabel = container.querySelector('#stat-filtered-label');
+  if (statFilteredVal && statFilteredLabel) {
+    statFilteredVal.textContent = selectedFilterDate ? filteredResponses.length : form.questions.length;
+    statFilteredLabel.textContent = selectedFilterDate ? 'Khớp bộ lọc' : 'Câu hỏi';
+  }
+
+  // 6. Update responses content
+  const contentEl = container.querySelector('#responses-content');
+  if (contentEl) {
+    if (selectedResponseId) {
+      contentEl.innerHTML = renderResponseDetail(form, allResponses);
+    } else {
+      contentEl.innerHTML = renderResponseList(form, filteredResponses, allResponses.length, selectedFilterDate);
+    }
+  }
 }
 
 function renderResponseList(form, responses, totalCount, filterDate) {
@@ -229,7 +309,7 @@ function renderResponseDetail(form, responses) {
   const resp = responses.find((r) => r.id === selectedResponseId);
   if (!resp) {
     selectedResponseId = null;
-    return renderResponseList(form, responses, responses.length, selectedFilterDate);
+    return renderResponseList(form, getFilteredResponses(), responses.length, selectedFilterDate);
   }
 
   const index = responses.indexOf(resp);
@@ -281,7 +361,6 @@ function renderAnswerValue(question, answer) {
     case 'file':
       if (typeof answer === 'object') {
         const isImage = answer.type && answer.type.startsWith('image/');
-        // Support both Supabase (url) and localStorage (data) modes
         const src = answer.url || answer.data;
 
         if (src && isImage) {
@@ -314,16 +393,16 @@ function renderAnswerValue(question, answer) {
   }
 }
 
-function setupResponsesEvents(container, form, signal) {
+function setupResponsesEvents(container, signal) {
   // Date input change event
   const dateInput = container.querySelector('#filter-date-input');
   if (dateInput) {
     dateInput.addEventListener(
-      'change',
-      async (e) => {
+      'input',
+      (e) => {
         selectedFilterDate = e.target.value;
         selectedResponseId = null;
-        await renderResponsesPage(container, form, signal);
+        updateFilterView(container);
       },
       { signal }
     );
@@ -336,7 +415,7 @@ function setupResponsesEvents(container, form, signal) {
       if (e.target.closest('#filter-today-btn')) {
         selectedFilterDate = getLocalDateString(Date.now());
         selectedResponseId = null;
-        await renderResponsesPage(container, form, signal);
+        updateFilterView(container);
         return;
       }
 
@@ -348,7 +427,7 @@ function setupResponsesEvents(container, form, signal) {
       ) {
         selectedFilterDate = '';
         selectedResponseId = null;
-        await renderResponsesPage(container, form, signal);
+        updateFilterView(container);
         return;
       }
 
@@ -357,9 +436,8 @@ function setupResponsesEvents(container, form, signal) {
       if (responseItem) {
         selectedResponseId = responseItem.dataset.responseId;
         const contentEl = container.querySelector('#responses-content');
-        const responses = await store.getResponses(form.id);
         if (contentEl) {
-          contentEl.innerHTML = renderResponseDetail(form, responses);
+          contentEl.innerHTML = renderResponseDetail(currentForm, cachedResponses);
         }
         return;
       }
@@ -367,11 +445,11 @@ function setupResponsesEvents(container, form, signal) {
       // Back to list
       if (e.target.closest('#back-to-list-btn')) {
         selectedResponseId = null;
-        await renderResponsesPage(container, form, signal);
+        updateFilterView(container);
         return;
       }
 
-      // Delete response
+      // Delete single response
       const deleteBtn = e.target.closest('#delete-response-btn');
       if (deleteBtn) {
         const responseId = deleteBtn.dataset.responseId;
@@ -383,14 +461,66 @@ function setupResponsesEvents(container, form, signal) {
           deleteBtn.disabled = true;
           deleteBtn.textContent = '⏳';
           try {
-            await store.deleteResponse(form.id, responseId);
+            await store.deleteResponse(currentForm.id, responseId);
+            cachedResponses = await store.getResponses(currentForm.id);
             selectedResponseId = null;
             showToast('Đã xóa phản hồi', 'success');
-            await renderResponsesPage(container, form, signal);
+            renderResponsesPageSkeleton(container, signal);
           } catch (err) {
             showToast('Lỗi khi xóa: ' + err.message, 'error');
             deleteBtn.disabled = false;
             deleteBtn.textContent = '🗑️ Xóa';
+          }
+        }
+        return;
+      }
+
+      // Delete all responses on selected date
+      const deleteByDateBtn = e.target.closest('#delete-by-date-btn');
+      if (deleteByDateBtn) {
+        const targetResponses = getFilteredResponses();
+        if (targetResponses.length === 0) return;
+
+        const dateLabel = formatDisplayDate(selectedFilterDate);
+        const count = targetResponses.length;
+        const confirmed = await showConfirm(
+          `Xóa tất cả phản hồi ngày ${dateLabel}?`,
+          `Thao tác này sẽ xóa vĩnh viễn toàn bộ ${count} phản hồi đã gửi trong ngày ${dateLabel}. Bạn có chắc chắn muốn xóa không?`
+        );
+
+        if (confirmed) {
+          deleteByDateBtn.disabled = true;
+          deleteByDateBtn.textContent = '⏳ Đang xóa...';
+          try {
+            await store.deleteResponses(
+              currentForm.id,
+              targetResponses.map((r) => r.id)
+            );
+            cachedResponses = await store.getResponses(currentForm.id);
+            selectedResponseId = null;
+            showToast(
+              `Đã xóa thành công ${count} phản hồi trong ngày ${dateLabel}!`,
+              'success'
+            );
+
+            if (cachedResponses.length === 0) {
+              renderResponsesPageSkeleton(container, signal);
+            } else {
+              const totalStat = container.querySelector('#stat-total-responses');
+              if (totalStat) totalStat.textContent = cachedResponses.length;
+              const latestStat = container.querySelector('#stat-latest-response');
+              if (latestStat) {
+                latestStat.textContent =
+                  cachedResponses.length > 0
+                    ? formatDate(cachedResponses[cachedResponses.length - 1].submittedAt).split(',')[0]
+                    : '—';
+              }
+              updateFilterView(container);
+            }
+          } catch (err) {
+            showToast('Lỗi khi xóa: ' + err.message, 'error');
+            deleteByDateBtn.disabled = false;
+            deleteByDateBtn.textContent = `🗑️ Xóa tất cả ngày này (${count})`;
           }
         }
         return;
@@ -403,12 +533,7 @@ function setupResponsesEvents(container, form, signal) {
         const originalText = exportCsvBtn.textContent;
         exportCsvBtn.textContent = '⏳ Đang xuất CSV...';
         try {
-          const allResponses = await store.getResponses(form.id);
-          const targetResponses = selectedFilterDate
-            ? allResponses.filter(
-                (r) => getLocalDateString(r.submittedAt) === selectedFilterDate
-              )
-            : allResponses;
+          const targetResponses = getFilteredResponses();
 
           if (targetResponses.length === 0) {
             showToast('Không có dữ liệu phản hồi để xuất', 'warning');
@@ -417,12 +542,12 @@ function setupResponsesEvents(container, form, signal) {
             return;
           }
 
-          const csvData = generateCsv(form, targetResponses);
+          const csvData = generateCsv(currentForm, targetResponses);
           const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           const dateSuffix = selectedFilterDate ? `_${selectedFilterDate}` : '';
-          const safeTitle = form.title.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g, '_');
+          const safeTitle = currentForm.title.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g, '_');
           a.href = url;
           a.download = `${safeTitle}${dateSuffix}_responses.csv`;
           a.click();
@@ -442,12 +567,12 @@ function setupResponsesEvents(container, form, signal) {
         exportBtn.disabled = true;
         exportBtn.textContent = '⏳ Đang xuất...';
         try {
-          const jsonData = await store.exportResponses(form.id);
+          const jsonData = await store.exportResponses(currentForm.id);
           const blob = new Blob([jsonData], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
+          a.download = `${currentForm.title.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g, '_')}_responses.json`;
           a.href = url;
-          a.download = `${form.title.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g, '_')}_responses.json`;
           a.click();
           URL.revokeObjectURL(url);
           showToast('Đã xuất dữ liệu phản hồi JSON!', 'success');
@@ -474,4 +599,3 @@ function setupResponsesEvents(container, form, signal) {
     { signal }
   );
 }
-
