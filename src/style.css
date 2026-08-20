@@ -1230,29 +1230,125 @@ textarea {
   border: 1px solid var(--border-subtle);
 }
 
-/* Response List */
+/* Response List Header & Selection */
 .response-list-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.response-list-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .response-list-header h2 {
   font-size: 1.15rem;
   font-weight: 700;
   color: #0f172a;
+  margin: 0;
 }
 
+.select-all-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+}
+
+.select-all-label:hover {
+  background: #e2e8f0;
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
+/* Bulk Actions Bar */
+.bulk-actions-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.bulk-count-badge {
+  font-size: 0.85rem;
+  color: var(--purple-700, #4338ca);
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+
+.bulk-count-badge strong {
+  font-weight: 700;
+  color: var(--purple-600);
+}
+
+/* Checkbox Style */
+.response-select-checkbox {
+  width: 17px;
+  height: 17px;
+  cursor: pointer;
+  accent-color: var(--purple-600);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.response-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 2px 4px 2px 0;
+  user-select: none;
+}
+
+/* Response Item Header Left */
+.response-item-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Response Item */
 .response-item {
   background: #ffffff;
   margin-bottom: 12px;
   cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.response-item.selected {
+  border-color: var(--purple-500);
+  background: #fcfaff;
+  box-shadow: 0 0 0 1px var(--purple-500), 0 4px 14px rgba(99, 102, 241, 0.12);
 }
 
 .response-item:hover {
   border-color: var(--purple-400);
   box-shadow: 0 4px 14px rgba(99, 102, 241, 0.08);
+}
+
+.response-item.selected:hover {
+  border-color: var(--purple-600);
+  box-shadow: 0 0 0 1px var(--purple-600), 0 4px 16px rgba(99, 102, 241, 0.16);
 }
 
 .response-item-header {

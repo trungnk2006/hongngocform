@@ -16,6 +16,7 @@ let selectedResponseId = null;
 let selectedFilterDate = '';
 let currentForm = null;
 let cachedResponses = [];
+let selectedResponseIds = new Set();
 
 function getLocalDateString(timestamp) {
   if (!timestamp) return '';
@@ -57,6 +58,7 @@ export async function renderResponses(container, formId, signal) {
   currentForm = form;
   selectedResponseId = null;
   selectedFilterDate = '';
+  selectedResponseIds.clear();
   cachedResponses = await store.getResponses(form.id);
 
   renderResponsesPageSkeleton(container, signal);
@@ -179,6 +181,12 @@ function renderResponsesPageSkeleton(container, signal) {
     </main>
   `;
 
+  // Apply indeterminate state if needed
+  const selectAllCheckbox = container.querySelector('#select-all-responses');
+  if (selectAllCheckbox) {
+    selectAllCheckbox.indeterminate = selectAllCheckbox.dataset.indeterminate === 'true';
+  }
+
   setupResponsesEvents(container, signal);
 }
 
@@ -186,6 +194,14 @@ function updateFilterView(container) {
   const allResponses = cachedResponses;
   const filteredResponses = getFilteredResponses();
   const form = currentForm;
+
+  // Prune any deleted responses from selection
+  const currentIds = new Set(cachedResponses.map((r) => r.id));
+  for (const id of Array.from(selectedResponseIds)) {
+    if (!currentIds.has(id)) {
+      selectedResponseIds.delete(id);
+    }
+  }
 
   // 1. Update date input value
   const dateInput = container.querySelector('#filter-date-input');
@@ -245,6 +261,11 @@ function updateFilterView(container) {
       contentEl.innerHTML = renderResponseDetail(form, allResponses);
     } else {
       contentEl.innerHTML = renderResponseList(form, filteredResponses, allResponses.length, selectedFilterDate);
+      // Apply indeterminate state
+      const selectAllCheckbox = contentEl.querySelector('#select-all-responses');
+      if (selectAllCheckbox) {
+        selectAllCheckbox.indeterminate = selectAllCheckbox.dataset.indeterminate === 'true';
+      }
     }
   }
 }
@@ -272,13 +293,48 @@ function renderResponseList(form, responses, totalCount, filterDate) {
     `;
   }
 
+  const selectedInCurrentView = responses.filter((r) => selectedResponseIds.has(r.id));
+  const isAllSelected = responses.length > 0 && selectedInCurrentView.length === responses.length;
+  const isSomeSelected = selectedInCurrentView.length > 0 && !isAllSelected;
+
   return `
     <div class="response-list-header">
-      <h2>${filterDate ? `Phản hồi ngày ${formatDisplayDate(filterDate)} (${responses.length})` : `Tất cả phản hồi (${responses.length})`}</h2>
+      <div class="response-list-title-wrap">
+        <h2>${filterDate ? `Phản hồi ngày ${formatDisplayDate(filterDate)} (${responses.length})` : `Tất cả phản hồi (${responses.length})`}</h2>
+        <label class="select-all-label" title="Chọn tất cả phản hồi đang hiển thị">
+          <input 
+            type="checkbox" 
+            id="select-all-responses" 
+            class="response-select-checkbox"
+            ${isAllSelected ? 'checked' : ''}
+            ${isSomeSelected ? 'data-indeterminate="true"' : ''}
+          />
+          <span>Chọn tất cả (${responses.length})</span>
+        </label>
+      </div>
+      ${
+        selectedInCurrentView.length > 0
+          ? `
+            <div class="bulk-actions-bar">
+              <span class="bulk-count-badge">Đã chọn <strong>${selectedInCurrentView.length}</strong></span>
+              <button class="btn btn-danger btn-sm" id="bulk-delete-btn" title="Xóa các phản hồi đã chọn">
+                🗑️ Xóa đã chọn (${selectedInCurrentView.length})
+              </button>
+              <button class="btn btn-secondary btn-sm" id="bulk-export-csv-btn" title="Xuất các phản hồi đã chọn sang file CSV">
+                📊 Xuất đã chọn
+              </button>
+              <button class="btn btn-secondary btn-sm" id="bulk-deselect-btn" title="Bỏ chọn tất cả">
+                ✕ Bỏ chọn
+              </button>
+            </div>
+          `
+          : ''
+      }
     </div>
     <div class="response-list">
       ${responses
         .map((resp, i) => {
+          const isSelected = selectedResponseIds.has(resp.id);
           // Get preview text from first text/choice answer
           let preview = '';
           for (const q of form.questions) {
@@ -290,9 +346,19 @@ function renderResponseList(form, responses, totalCount, filterDate) {
           }
 
           return `
-            <div class="response-item card" data-response-id="${resp.id}" data-response-index="${i}">
+            <div class="response-item card ${isSelected ? 'selected' : ''}" data-response-id="${resp.id}" data-response-index="${i}">
               <div class="response-item-header">
-                <span class="response-item-number">Phản hồi #${i + 1}</span>
+                <div class="response-item-header-left">
+                  <label class="response-checkbox-label" title="Chọn phản hồi này" onclick="event.stopPropagation()">
+                    <input 
+                      type="checkbox" 
+                      class="response-select-checkbox item-checkbox" 
+                      data-response-id="${resp.id}" 
+                      ${isSelected ? 'checked' : ''}
+                    />
+                  </label>
+                  <span class="response-item-number">Phản hồi #${i + 1}</span>
+                </div>
                 <span class="response-item-date">${formatDate(resp.submittedAt)}</span>
               </div>
               ${preview ? `<div class="response-item-preview">${escapeHtml(preview)}</div>` : ''}
@@ -402,11 +468,45 @@ function setupResponsesEvents(container, signal) {
       (e) => {
         selectedFilterDate = e.target.value;
         selectedResponseId = null;
+        selectedResponseIds.clear();
         updateFilterView(container);
       },
       { signal }
     );
   }
+
+  // Checkbox change listener
+  container.addEventListener(
+    'change',
+    (e) => {
+      // Select All checkbox
+      if (e.target.closest('#select-all-responses')) {
+        const selectAll = e.target.closest('#select-all-responses');
+        const filtered = getFilteredResponses();
+        if (selectAll.checked) {
+          filtered.forEach((r) => selectedResponseIds.add(r.id));
+        } else {
+          filtered.forEach((r) => selectedResponseIds.delete(r.id));
+        }
+        updateFilterView(container);
+        return;
+      }
+
+      // Individual response checkbox
+      if (e.target.closest('.item-checkbox')) {
+        const chk = e.target.closest('.item-checkbox');
+        const respId = chk.dataset.responseId;
+        if (chk.checked) {
+          selectedResponseIds.add(respId);
+        } else {
+          selectedResponseIds.delete(respId);
+        }
+        updateFilterView(container);
+        return;
+      }
+    },
+    { signal }
+  );
 
   container.addEventListener(
     'click',
@@ -415,6 +515,7 @@ function setupResponsesEvents(container, signal) {
       if (e.target.closest('#filter-today-btn')) {
         selectedFilterDate = getLocalDateString(Date.now());
         selectedResponseId = null;
+        selectedResponseIds.clear();
         updateFilterView(container);
         return;
       }
@@ -427,13 +528,98 @@ function setupResponsesEvents(container, signal) {
       ) {
         selectedFilterDate = '';
         selectedResponseId = null;
+        selectedResponseIds.clear();
         updateFilterView(container);
         return;
       }
 
-      // Click response item to view detail
+      // Bulk Deselect button
+      if (e.target.closest('#bulk-deselect-btn')) {
+        selectedResponseIds.clear();
+        updateFilterView(container);
+        return;
+      }
+
+      // Bulk Delete button
+      const bulkDeleteBtn = e.target.closest('#bulk-delete-btn');
+      if (bulkDeleteBtn) {
+        const targetResponses = getFilteredResponses().filter((r) => selectedResponseIds.has(r.id));
+        if (targetResponses.length === 0) return;
+
+        const count = targetResponses.length;
+        const confirmed = await showConfirm(
+          `Xóa ${count} phản hồi đã chọn?`,
+          `Thao tác này sẽ xóa vĩnh viễn ${count} phản hồi đã chọn khỏi hệ thống. Bạn có chắc chắn muốn xóa không?`
+        );
+
+        if (confirmed) {
+          bulkDeleteBtn.disabled = true;
+          bulkDeleteBtn.textContent = '⏳ Đang xóa...';
+          try {
+            await store.deleteResponses(
+              currentForm.id,
+              targetResponses.map((r) => r.id)
+            );
+            targetResponses.forEach((r) => selectedResponseIds.delete(r.id));
+            cachedResponses = await store.getResponses(currentForm.id);
+            showToast(`Đã xóa thành công ${count} phản hồi!`, 'success');
+
+            if (cachedResponses.length === 0) {
+              renderResponsesPageSkeleton(container, signal);
+            } else {
+              const totalStat = container.querySelector('#stat-total-responses');
+              if (totalStat) totalStat.textContent = cachedResponses.length;
+              const latestStat = container.querySelector('#stat-latest-response');
+              if (latestStat) {
+                latestStat.textContent =
+                  cachedResponses.length > 0
+                    ? formatDate(cachedResponses[cachedResponses.length - 1].submittedAt).split(',')[0]
+                    : '—';
+              }
+              updateFilterView(container);
+            }
+          } catch (err) {
+            showToast('Lỗi khi xóa: ' + err.message, 'error');
+            bulkDeleteBtn.disabled = false;
+            bulkDeleteBtn.textContent = `🗑️ Xóa đã chọn (${count})`;
+          }
+        }
+        return;
+      }
+
+      // Bulk Export CSV button
+      const bulkExportCsvBtn = e.target.closest('#bulk-export-csv-btn');
+      if (bulkExportCsvBtn) {
+        const targetResponses = cachedResponses.filter((r) => selectedResponseIds.has(r.id));
+        if (targetResponses.length === 0) {
+          showToast('Vui lòng chọn ít nhất một phản hồi để xuất', 'warning');
+          return;
+        }
+        bulkExportCsvBtn.disabled = true;
+        const originalText = bulkExportCsvBtn.textContent;
+        bulkExportCsvBtn.textContent = '⏳ Đang xuất...';
+        try {
+          const csvData = generateCsv(currentForm, targetResponses);
+          const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const safeTitle = currentForm.title.replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]/g, '_');
+          a.href = url;
+          a.download = `${safeTitle}_selected_${targetResponses.length}_responses.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast(`Đã xuất ${targetResponses.length} phản hồi đã chọn sang file Excel (CSV)!`, 'success');
+        } catch (err) {
+          showToast('Lỗi khi xuất CSV: ' + err.message, 'error');
+        }
+        bulkExportCsvBtn.disabled = false;
+        bulkExportCsvBtn.textContent = originalText;
+        return;
+      }
+
+      // Click response item to view detail (ignore if clicked on checkbox label or input)
       const responseItem = e.target.closest('.response-item');
-      if (responseItem) {
+      if (responseItem && !e.target.closest('.response-checkbox-label') && !e.target.closest('.response-select-checkbox')) {
         selectedResponseId = responseItem.dataset.responseId;
         const contentEl = container.querySelector('#responses-content');
         if (contentEl) {
@@ -599,3 +785,4 @@ function setupResponsesEvents(container, signal) {
     { signal }
   );
 }
+
